@@ -1,15 +1,83 @@
-"""Minimal FastAPI test for Vercel deployment."""
+"""
+FastAPI-приложение для визуализации задачи распределения дизайнерских ресурсов
+методом динамического программирования (Vercel entry point).
+"""
+import os
+import sys
+
+# Add web_app directory to path so we can import dp_solver
+_WEBAPP = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "web_app"))
+sys.path.insert(0, _WEBAPP)
+
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel
+from typing import List, Optional
 
-app = FastAPI()
-
-
-@app.get("/")
-async def root():
-    return JSONResponse({"status": "ok", "message": "Hello from Vercel!"})
+from dp_solver import solve_dp, generate_example, generate_random
 
 
-@app.get("/{path:path}")
-async def catch_all(path: str):
-    return JSONResponse({"status": "ok", "path": path})
+class SolveRequest(BaseModel):
+    n_projects: int
+    total_resources: int
+    efficiency_table: List[List[float]]
+    project_names: Optional[List[str]] = None
+
+
+app = FastAPI(
+    title="Оптимизация распределения дизайнерских ресурсов",
+    description="Визуализация решения задачи распределения дизайнеров между проектами методом динамического программирования",
+)
+
+
+@app.get("/", response_class=HTMLResponse)
+async def index():
+    html_path = os.path.join(_WEBAPP, "templates", "index.html")
+    with open(html_path, "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
+
+@app.post("/solve")
+async def solve(payload: SolveRequest):
+    """
+    Решает задачу распределения ресурсов методом динамического программирования.
+    """
+    if payload.n_projects <= 0 or payload.total_resources <= 0:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Количество проектов и ресурсов должно быть положительным"},
+        )
+
+    if len(payload.efficiency_table) != payload.n_projects:
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"Таблица эффективности должна содержать {payload.n_projects} строк"},
+        )
+
+    for i, row in enumerate(payload.efficiency_table):
+        if len(row) != payload.total_resources + 1:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": f"Строка {i} таблицы должна содержать {payload.total_resources + 1} значений"
+                },
+            )
+
+    result = solve_dp(payload.n_projects, payload.total_resources, payload.efficiency_table)
+    result["project_names"] = payload.project_names or [
+        f"Проект {i + 1}" for i in range(payload.n_projects)
+    ]
+
+    return result
+
+
+@app.post("/example")
+async def example():
+    """Возвращает пример задачи из курсовой работы."""
+    return generate_example()
+
+
+@app.post("/random")
+async def random_example():
+    """Генерирует случайный пример задачи."""
+    return generate_random(n_projects=4, total_resources=8)
